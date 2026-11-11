@@ -42,6 +42,9 @@ a{color:var(--azul2)}
 /* ---------- Botones e inputs ---------- */
 .btn{text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:42px;padding:0 16px;border-radius:12px;font-weight:600;background:#E9EFF9;color:var(--tinta);transition:.15s;white-space:nowrap}
 .btn:active{transform:scale(.97)}
+.btn svg{width:18px;height:18px;flex:none}
+.enviar svg{width:22px;height:22px;flex:none}
+svg{flex:none;max-width:100%}
 .btn.pri{background:var(--azul2);color:#fff}
 .btn.ok{background:var(--verde);color:#fff}
 .btn.peligro{background:#FDECEC;color:var(--rojo)}
@@ -390,7 +393,7 @@ body.ver-detalle .nav{display:none}
 // Asígname · tareas, comunicados y chat del equipo
 // Misma base y mismas cuentas que VerifyCredit y Mi Planilla.
 // =====================================================================
-const APP_VER = '2026-11-11.1';
+const APP_VER = '2026-11-11.2';
 const SB_URL = 'https://edmvfqelxsxevpmxgbav.supabase.co';
 const SB_KEY = 'sb_publishable_lgTmmLtUESDDyX2sff6ArQ_z65Ti9d6';
 const DOMINIO = 'planilla.maspisto.hn';
