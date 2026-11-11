@@ -1,5 +1,5 @@
 // Asígname · service worker: abre sin conexión, se actualiza solo y muestra notificaciones.
-const CACHE = 'asigname-v1';
+const CACHE = 'asigname-v2';
 const BASE = ['./', 'asigname.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-180.png', 'icon-32.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => Promise.all(BASE.map(u => c.add(u).catch(() => { })))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });

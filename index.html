@@ -195,6 +195,9 @@ body.ver-detalle .nav{display:none}
 .m.yo .bu .reac{right:8px}.m:not(.yo) .bu .reac{left:8px}
 .m.con-reac{margin-bottom:16px}
 .bu .reac small{font-size:11px;color:#667781;margin-left:2px}
+.bu .elim{font-size:12px;color:var(--rojo);font-weight:600;margin-bottom:3px}
+.m.eliminado .bu{background:#FFF1F1;outline:1px dashed #F5B5B5}
+.m.eliminado.inicio .bu:before{display:none}
 .m.flash .bu{animation:flash 1.2s}
 @keyframes flash{0%,60%{box-shadow:0 0 0 3px var(--amarillo)}}
 .archivo-msg{display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.05);border-radius:8px;padding:10px;min-width:min(220px,60vw);text-decoration:none;color:inherit}
@@ -415,7 +418,7 @@ body.bloqueada #app,body.bloqueada .velo,body.bloqueada .visor,body.bloqueada .m
 // Asígname · tareas, comunicados y chat del equipo
 // Misma base y mismas cuentas que VerifyCredit y Mi Planilla.
 // =====================================================================
-const APP_VER = '2026-11-11.4';
+const APP_VER = '2026-11-11.5';
 const SB_URL = 'https://edmvfqelxsxevpmxgbav.supabase.co';
 const SB_KEY = 'sb_publishable_lgTmmLtUESDDyX2sff6ArQ_z65Ti9d6';
 const DOMINIO = 'planilla.maspisto.hn';
@@ -430,6 +433,7 @@ const S = {
   reac: new Map(),        // mensaje_id -> array {user_id, emoji}
   votos: new Map(),       // mensaje_id -> array {user_id, opciones}
   completos: new Set(),   // chats con todo el historial cargado
+  borrados: new Map(), // mensaje_id -> contenido original (solo gerente)
   tareas: new Map(), comunicados: new Map(), lecturas: new Map(),
   online: new Set(), tipeando: new Map(), ruta: { v: 'chats' },
   vistaChats: 'todos', vistaTareas: 'mias', filtroTareas: 'abiertas', modoTareas: 'lista', filtroPersona: '', filtroArea: '',
@@ -558,6 +562,7 @@ const areasJefe = () => S.yo?.areas_jefe || [];
 const puedeAsignar = () => esGerente() || areasJefe().length > 0;
 function puedeAsignarA(id) { if (id === S.me) return true; if (esGerente()) return true; const m = P(id); return !!m && areasJefe().includes(m.area_id); }
 const areaNombre = id => S.areas.get(id)?.nombre || 'Sin área';
+const areasDe = m => m ? [...new Set([m.area_id, ...(m.areas_extra || [])].filter(a => a && S.areas.has(a)))] : [];
 
 // ---------- archivos ----------
 const urlCache = new Map();
@@ -709,16 +714,20 @@ function alPresionar(el, fn) {
 function selectorPersonas({ titulo = 'Elegir personas', multiple = true, elegidos = [], filtro = () => true, extra = '', si = 'Listo' } = {}) {
   return new Promise(res => {
     let sel = new Set(elegidos), r = null;
-    const lista = [...S.miembros.values()].filter(m => m.activo && filtro(m)).sort((a, b) => areaNombre(a.area_id).localeCompare(areaNombre(b.area_id)) || nombreCorto(a).localeCompare(nombreCorto(b)));
+    // una persona sale en cada una de sus áreas
+    const lista = [...S.miembros.values()].filter(m => m.activo && filtro(m)).flatMap(m => (areasDe(m).length ? areasDe(m) : [null]).map(a => ({ a, m })))
+      .sort((x, y) => areaNombre(x.a).localeCompare(areaNombre(y.a)) || nombreCorto(x.m).localeCompare(nombreCorto(y.m), 'es', { numeric: true }));
     const h = hoja({
       titulo, cuerpo: `${extra}<div class="buscar" style="margin:0"><span>${I.lupa}</span><input class="inp" id="bq" placeholder="Buscar"></div><div class="sel-chips" id="sc"></div><div class="lista-sel" id="ls"></div>`,
       pie: multiple ? `<button class="btn pri" data-si>${si}</button>` : '', alCerrar: () => res(r),
     });
     const pintar = () => {
       const q = $('#bq', h).value.trim().toLowerCase(); let area = null, html = '';
-      for (const m of lista) {
+      const vistos = new Set();
+      for (const { a, m } of lista) {
         if (q && !((m.nombre || '') + ' ' + (m.alias || '') + ' ' + (m.cargo || '')).toLowerCase().includes(q)) continue;
-        if (m.area_id !== area) { area = m.area_id; html += `<div class="grupo-titulo" style="padding-left:4px">${esc(areaNombre(area))}</div>`; }
+        if (q) { if (vistos.has(m.user_id)) continue; vistos.add(m.user_id); }
+        if (a !== area) { area = a; html += `<div class="grupo-titulo" style="padding-left:4px">${esc(areaNombre(area))}</div>`; }
         html += `<div class="it ${sel.has(m.user_id) ? 'on' : ''}" data-u="${m.user_id}">${avatar(m.user_id, 's')}<div class="grow"><b>${esc(nombreCorto(m))}${m.user_id === S.me ? ' (usted)' : ''}</b><div class="small muted ell">${esc(m.cargo || '')}</div></div>${multiple ? '<div class="ck">✓</div>' : ''}</div>`;
       }
       $('#ls', h).innerHTML = html || '<div class="vacio">Nadie coincide</div>';
@@ -809,7 +818,7 @@ function pintarSinAcceso(t) {
 
 async function cargarEquipo() {
   // el nombre real no se puede leer desde la app: cada quien aparece con su cargo. Solo el gerente recibe los nombres.
-  const COLS = 'user_id,empresa_id,alias,cargo,area_id,rol,areas_jefe,foto,estado_texto,telefono,activo,excluido,ultimo_visto,creado_en';
+  const COLS = 'user_id,empresa_id,alias,cargo,area_id,rol,areas_jefe,foto,estado_texto,telefono,activo,excluido,ultimo_visto,creado_en,areas_extra';
   const [m, a, n] = await Promise.all([sb.from('as_miembros').select(COLS), sb.from('as_areas').select('*').order('orden').order('nombre'),
     S.yo?.rol === 'gerente' ? sb.rpc('as_nombres') : Promise.resolve({ data: [] })]);
   if (m.error) throw m.error; if (a.error) throw a.error;
@@ -928,6 +937,7 @@ function conectarTiempoReal() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'as_chat_miembros' }, p => rtChatMiembro(p))
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'as_chats' }, p => rtChat(p.new))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'as_reacciones' }, p => rtReaccion(p.new))
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'as_mensajes_borrados' }, p => rtBorrado(p.new))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'as_votos' }, p => rtVoto(p.new))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'as_tareas' }, p => rtTarea(p))
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'as_tarea_eventos' }, p => rtTareaEvento(p.new))
@@ -1206,6 +1216,10 @@ async function cargarExtras(chatId, ids) {
     sb.from('as_votos').select('mensaje_id,user_id,opciones').in('mensaje_id', ids),
   ]);
   ids.forEach(i => { S.reac.delete(i); S.votos.delete(i); });
+  if (esGerente()) {
+    const b = await sb.from('as_mensajes_borrados').select('*').in('mensaje_id', ids);
+    (b.data || []).forEach(x => S.borrados.set(x.mensaje_id, x));
+  }
   (r.data || []).forEach(x => { if (!x.emoji) return; if (!S.reac.has(x.mensaje_id)) S.reac.set(x.mensaje_id, []); S.reac.get(x.mensaje_id).push(x); });
   (v.data || []).forEach(x => { if (!S.votos.has(x.mensaje_id)) S.votos.set(x.mensaje_id, []); S.votos.get(x.mensaje_id).push(x); });
 }
@@ -1311,7 +1325,7 @@ function pintarMensajes(abajo = false, primerNoLeido = null, nNoLeidos = 0) {
   const el = $('#msgs'); if (!el || !chatAbierto) return;
   const arr = S.msgs.get(chatAbierto) || [];
   const cerca = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
-  let html = S.completos.has(chatAbierto) ? `<div class="sistema"><span>🔒 Los mensajes son solo para el equipo de ${esc(S.yo.empresa.nombre)}</span></div>` : '';
+  let html = S.completos.has(chatAbierto) ? `<div class="sistema"><span>🔒 Los mensajes son solo para su equipo</span></div>` : '';
   let prev = null;
   for (const m of arr) {
     if (!prev || diaKey(prev.creado_en) !== diaKey(m.creado_en)) html += `<div class="dia"><span>${etiquetaDia(m.creado_en)}</span></div>`;
@@ -1370,6 +1384,9 @@ function previewMsg(m) {
 }
 function htmlMensaje(m, prev) {
   if (m.tipo === 'sistema') return `<div class="sistema" data-m="${m.id}"><span>${esc(m.texto)}</span></div>`;
+  // el gerente siempre ve lo que decía un mensaje eliminado
+  const elim = m.borrado ? S.borrados.get(m.id) : null;
+  if (elim) m = { ...m, tipo: elim.tipo, texto: elim.texto, archivo: elim.archivo, datos: elim.datos, borrado: false };
   const yo = m.user_id === S.me;
   const c = S.chats.get(m.chat_id);
   const inicio = !prev || prev.user_id !== m.user_id || prev.tipo === 'sistema' || diaKey(prev.creado_en) !== diaKey(m.creado_en) || (new Date(m.creado_en) - new Date(prev.creado_en) > 10 * 60e3);
@@ -1411,13 +1428,14 @@ function htmlMensaje(m, prev) {
       default: cuerpo = `${autor}${reenv}${resp}<span class="txt">${formatoTexto(m.texto)}</span>${meta}`;
     }
   }
+  if (elim) cuerpo = `<div class="elim">🚫 Eliminado${elim.borrado_por && elim.borrado_por !== m.user_id ? ' por ' + esc(nom(elim.borrado_por)) : ''} · ${fechaHora(elim.borrado_en)} · solo lo ve el gerente</div>` + cuerpo;
   let reacHtml = '';
   if (reacs.length) {
     const g = {}; reacs.forEach(r => g[r.emoji] = (g[r.emoji] || 0) + 1);
     reacHtml = `<div class="reac" data-reac="${m.id}">${Object.keys(g).slice(0, 3).join('')}${reacs.length > 1 ? `<small>${reacs.length}</small>` : ''}</div>`;
   }
   const err = m._estado === 'error' ? `<button class="btn xs peligro" data-reint="${m.local_id}" style="align-self:center;margin-right:6px">Reintentar</button>` : '';
-  return `<div class="${cls}" data-m="${m.id}">${err}<div class="bu ${media && m.tipo === 'imagen' && !m.texto ? 'media' : ''}">${cuerpo}${reacHtml}</div></div>`;
+  return `<div class="${cls}${elim ? ' eliminado' : ''}" data-m="${m.id}">${err}<div class="bu ${media && m.tipo === 'imagen' && !m.texto ? 'media' : ''}">${cuerpo}${reacHtml}</div></div>`;
 }
 function htmlMapa(d) {
   if (!d?.lat) return '';
@@ -2024,6 +2042,12 @@ function rtChat(n) {
   const c = S.chats.get(n.id); if (!c) return;
   ['nombre', 'descripcion', 'foto', 'solo_admins', 'ultimo_id', 'ultimo_en', 'ultimo_texto', 'ultimo_user', 'ultimo_tipo'].forEach(k => { if (k in n) c[k] = n[k]; });
   pintarChatsDeb();
+}
+function rtBorrado(b) {
+  if (!b?.mensaje_id || !esGerente()) return;
+  S.borrados.set(b.mensaje_id, b);
+  const m = (S.msgs.get(b.chat_id) || []).find(x => x.id === b.mensaje_id);
+  if (m && chatAbierto === b.chat_id) reemplazarMensajeDom(m);
 }
 function rtReaccion(r) { if (!r?.mensaje_id) return; if (r.user_id === S.me && (S.reac.get(r.mensaje_id) || []).some(x => x.user_id === S.me && x.emoji === r.emoji)) return; aplicarReaccion(r); }
 function rtVoto(v) { if (!v?.mensaje_id || v.user_id === S.me) return; aplicarVoto(v); }
@@ -2716,14 +2740,14 @@ function pintarEquipo() {
   const q = (S.buscarEq || '').toLowerCase();
   const gente = [...S.miembros.values()].filter(m => m.activo && (!q || ((m.nombre || '') + ' ' + (m.alias || '') + ' ' + (m.cargo || '')).toLowerCase().includes(q)));
   const areas = [...S.areas.values()].filter(a => a.activo).sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre));
-  const grupos = areas.map(a => [a, gente.filter(m => m.area_id === a.id)]).filter(g => g[1].length);
-  const sin = gente.filter(m => !S.areas.has(m.area_id));
+  const grupos = areas.map(a => [a, gente.filter(m => areasDe(m).includes(a.id))]).filter(g => g[1].length);
+  const sin = gente.filter(m => !areasDe(m).length);
   if (sin.length) grupos.push([{ nombre: 'Sin área', color: '#94A3B8' }, sin]);
   const quitados = esGerente() && !q ? [...S.miembros.values()].filter(m => m.excluido) : [];
   const rolTag = m => m.rol === 'gerente' ? '<span class="tag" style="background:#FEF3C7;color:#92400E">Gerente</span>' : m.rol === 'jefe' ? '<span class="tag" style="background:#E0E7FF;color:#3730A3">Jefe</span>' : '';
   ponerLista(`<div class="top"><div class="h1 grow">Equipo</div>${esGerente() ? `<button class="btn sm" id="e-areas" style="background:rgba(255,255,255,.18);color:#fff">Áreas</button>` : ''}</div>
     <div class="buscar"><span>${I.lupa}</span><input class="inp" id="e-q" placeholder="Buscar persona o cargo" value="${esc(S.buscarEq || '')}"></div>
-    <div class="scroll" id="lequipo">${grupos.map(([a, ms]) => `<div class="grupo-titulo" style="color:${a.color}">${esc(a.nombre)} · ${ms.length}</div>${ms.sort((x, y) => (x.rol === 'gerente' ? 0 : x.rol === 'jefe' ? 1 : 2) - (y.rol === 'gerente' ? 0 : y.rol === 'jefe' ? 1 : 2) || nombreCorto(x).localeCompare(nombreCorto(y))).map(m => {
+    <div class="scroll" id="lequipo">${grupos.map(([a, ms]) => `<div class="grupo-titulo" style="color:${a.color}">${esc(a.nombre)} · ${ms.length}</div>${ms.sort((x, y) => (x.rol === 'gerente' ? 0 : x.rol === 'jefe' ? 1 : 2) - (y.rol === 'gerente' ? 0 : y.rol === 'jefe' ? 1 : 2) || nombreCorto(x).localeCompare(nombreCorto(y), 'es', { numeric: true })).map(m => {
       const ab = [...S.tareas.values()].filter(t => t.responsable_id === m.user_id && ABIERTAS.includes(t.estado));
       const venc = ab.filter(vencida).length;
       return `<div class="ci" data-persona="${m.user_id}">${avatar(m.user_id, '', true)}<div class="grow"><div class="t"><b>${esc(nombreCorto(m))}${m.user_id === S.me ? ' (usted)' : ''}</b>${rolTag(m)}</div><div class="s"><span class="p">${esc(m.estado_texto || m.nombre || '')}</span>${(puedeAsignarA(m.user_id) && puedeAsignar()) && ab.length ? `<span class="tag">📋 ${ab.length}</span>` : ''}${venc && puedeAsignarA(m.user_id) ? `<span class="tag" style="background:#FDECEC;color:var(--rojo)">⚠️ ${venc}</span>` : ''}</div></div></div>`;
@@ -2743,7 +2767,7 @@ function verPersona(u) {
   const h = hoja({
     titulo: 'Perfil', cuerpo: `<div class="col" style="align-items:center;text-align:center">${avatar(u, 'xl', true)}
       <div class="h1">${esc(nombreCorto(m))}</div>${m.nombre ? `<div class="muted">${esc(m.nombre)}</div>` : ''}
-      <div>${esc(m.cargo || '')} · ${esc(areaNombre(m.area_id))}${m.rol !== 'miembro' ? ` · <b>${m.rol === 'gerente' ? 'Gerente' : 'Jefe de ' + esc((m.areas_jefe?.length ? m.areas_jefe : [m.area_id]).map(areaNombre).join(', '))}</b>` : ''}</div>
+      <div>${esc(m.cargo || '')} · ${esc(areasDe(m).map(areaNombre).join(', ') || 'Sin área')}${m.rol !== 'miembro' ? ` · <b>${m.rol === 'gerente' ? 'Gerente' : 'Jefe de ' + esc((m.areas_jefe?.length ? m.areas_jefe : [m.area_id]).map(areaNombre).join(', '))}</b>` : ''}</div>
       ${m.estado_texto ? `<div class="tag" style="height:auto;padding:4px 10px">💬 ${esc(m.estado_texto)}</div>` : ''}
       <div class="small muted">${S.online.has(u) ? '🟢 En línea' : esc(ultVez(m.ultimo_visto))}</div></div>
       <div class="row wrap" style="justify-content:center">
@@ -2767,12 +2791,16 @@ function editarMiembro(u) {
       <label class="f">Cómo aparece en el chat (vacío = su cargo, numerado si se repite)<input class="inp" id="m-al" value="${esc(m.alias || '')}" placeholder="${esc(nombreCorto({ ...m, alias: null }))}"></label>
       <label class="f">Cargo<input class="inp" id="m-ca" value="${esc(m.cargo || '')}" maxlength="80"></label>
       <label class="f">Área<select class="inp" id="m-ar"><option value="">Sin área</option>${areas.map(a => `<option value="${a.id}" ${m.area_id === a.id ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></label>
+      <div class="f" style="font-size:13px;font-weight:600;color:var(--txt2)">También aparece en estas áreas<div class="chips" style="flex-wrap:wrap;margin-top:6px" id="m-ex-ar"></div></div>
       <div class="f" style="font-size:13px;font-weight:600;color:var(--txt2)">Rol en Asígname<div class="seg" id="m-rol" style="margin-top:6px">${[['miembro', 'Miembro'], ['jefe', 'Jefe de área'], ['gerente', 'Gerente']].map(([k, t]) => `<button type="button" data-r="${k}" class="${m.rol === k ? 'on' : ''}">${t}</button>`).join('')}</div>
         <div class="small muted" style="margin-top:6px;font-weight:400">Miembro: tareas propias y chat · Jefe: asigna tareas y envía comunicados a sus áreas · Gerente: todo</div></div>
       <div id="m-jw" class="f" style="font-size:13px;font-weight:600;color:var(--txt2)">Áreas a su cargo<div class="chips" style="flex-wrap:wrap;margin-top:6px" id="m-je"></div><div class="small muted" style="font-weight:400">Si no elige, dirige su propia área</div></div>`,
     pie: `<button class="btn pri" id="ok">Guardar</button>`,
   });
   $('.bd', h).insertAdjacentHTML('beforeend', u === S.me ? '' : `<label class="row" style="gap:10px"><span class="sw"><input type="checkbox" id="m-ex" ${m.excluido ? 'checked' : ''}><i></i></span><span>Quitar de Asígname<div class="small muted">No podrá entrar ni aparecerá en el equipo. No afecta a VerifyCredit ni a Mi Planilla.</div></span></label>`);
+  let extra = [...(m.areas_extra || [])];
+  const pe = () => { const pr = $('#m-ar', h).value; $('#m-ex-ar', h).innerHTML = areas.filter(a => a.id !== pr).map(a => `<button type="button" class="chip ${extra.includes(a.id) ? 'on' : ''}" data-x="${a.id}">${esc(a.nombre)}</button>`).join(''); $$('[data-x]', h).forEach(b => b.onclick = () => { const id = b.dataset.x; extra = extra.includes(id) ? extra.filter(x => x !== id) : [...extra, id]; pe(); }); };
+  pe(); $('#m-ar', h).onchange = pe;
   let rol = m.rol;
   const pj = () => { $('#m-jw', h).classList.toggle('hidden', rol !== 'jefe'); $('#m-je', h).innerHTML = areas.map(a => `<button type="button" class="chip ${jefeDe.includes(a.id) ? 'on' : ''}" data-a="${a.id}">${esc(a.nombre)}</button>`).join(''); $$('[data-a]', h).forEach(b => b.onclick = () => { const id = b.dataset.a; jefeDe = jefeDe.includes(id) ? jefeDe.filter(x => x !== id) : [...jefeDe, id]; pj(); }); };
   pj();
@@ -2780,6 +2808,7 @@ function editarMiembro(u) {
   $('#ok', h).onclick = async () => {
     try {
       await rpc('as_editar_miembro', { p_uid: u, p_rol: rol, p_area: $('#m-ar', h).value || null, p_areas_jefe: rol === 'jefe' ? jefeDe : [], p_alias: $('#m-al', h).value, p_cargo: $('#m-ca', h).value, p_excluido: $('#m-ex', h) ? $('#m-ex', h).checked : false });
+      await rpc('as_areas_extra', { p_uid: u, p_areas: extra });
       await cargarEquipo(); await cargarChats(); await h.cerrar(); toast('Guardado');
       if (S.listaActual === 'equipo') pintarEquipo();
     } catch (e) { toast(errMsg(e), true); }
@@ -2876,7 +2905,7 @@ function pintarPerfil() {
     <div class="scroll"><div class="det" style="max-width:560px">
       <div class="col" style="align-items:center;text-align:center"><div id="pf-av">${avatar(S.me, 'xl')}</div><button class="btn sm" id="pf-foto">📷 Cambiar foto</button>
         <div class="h1">${esc(nombreCorto(m))}</div><div class="muted">${esc(m.cargo || '')} · ${esc(areaNombre(m.area_id))}</div>
-        <div class="small muted">${esc(S.yo.empresa.nombre)} · ${S.yo.rol === 'gerente' ? 'Gerente' : S.yo.rol === 'jefe' ? 'Jefe de ' + esc(areasJefe().map(areaNombre).join(', ')) : 'Miembro'}</div></div>
+        <div class="small muted">${S.yo.rol === 'gerente' ? 'Gerente' : S.yo.rol === 'jefe' ? 'Jefe de ' + esc(areasJefe().map(areaNombre).join(', ')) : 'Miembro'}</div></div>
       <div class="card col">
         ${esGerente() ? `<label class="f">Cómo aparezco en el chat<input class="inp" id="pf-al" value="${esc(m.alias || '')}" placeholder="${esc(nombreCorto({ ...m, alias: null }))}"></label>` : ''}
         <label class="f">Estado<input class="inp" id="pf-es" value="${esc(m.estado_texto || '')}" placeholder="Ej: En ruta de cobro · Choloma" maxlength="80"></label>

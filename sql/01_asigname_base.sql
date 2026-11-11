@@ -1012,7 +1012,7 @@ create policy as_files_ins on storage.objects for insert to authenticated with c
   bucket_id = 'asigname' and (storage.foldername(name))[1] = as_empresa()::text
   and ((storage.foldername(name))[2] <> 'chats' or as_soy_miembro(((storage.foldername(name))[3])::bigint)));
 
--- Áreas iniciales de Más Pisto (con tilde)
+-- Áreas iniciales
 insert into as_areas(empresa_id, nombre, color, orden)
 select e.id, a.nombre, a.color, a.orden from pl_empresas e,
   (values ('Administración', '#0B5AD6', 1), ('Créditos', '#7C3AED', 2), ('Cobros', '#F59E0B', 3), ('Recuperación', '#EF4444', 4), ('Incobrables', '#64748B', 5)) a(nombre, color, orden)

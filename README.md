@@ -1,6 +1,6 @@
 # Asígname
 
-Tareas, comunicados y chat del equipo (estilo WhatsApp) para Más Pisto.
+Tareas, comunicados y chat del equipo (estilo WhatsApp).
 Usa la misma base de Supabase (`edmvfqelxsxevpmxgbav`) y las mismas cuentas que VerifyCredit y Mi Planilla.
 
 - `index.html`: toda la app (vanilla JS + supabase-js). La versión está en `APP_VER` y en `version.json` (súbalos juntos; la app se recarga sola al ver una versión nueva).

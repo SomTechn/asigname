@@ -25,3 +25,7 @@ alter table as_miembros add column if not exists excluido boolean not null defau
 -- La app muestra cargos (alias = cargo, numerado si se repite: private.as_etiquetar). El nombre real no es legible
 -- desde la app (select por columnas en as_miembros, sin "nombre"); solo el gerente lo recibe con as_nombres().
 -- La app debe pedir columnas explícitas de as_miembros (nunca select *).
+
+-- 11-nov-2026 (migración asigname_08_borrados_y_areas_extra)
+-- as_mensajes_borrados: contenido original de los mensajes eliminados; solo lo lee el gerente (RLS). Lo llena as_borrar_mensaje.
+-- as_miembros.areas_extra + as_areas_extra(p_uid, p_areas): una persona puede aparecer en más de un área.
