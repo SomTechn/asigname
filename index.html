@@ -415,7 +415,7 @@ body.bloqueada #app,body.bloqueada .velo,body.bloqueada .visor,body.bloqueada .m
 // Asígname · tareas, comunicados y chat del equipo
 // Misma base y mismas cuentas que VerifyCredit y Mi Planilla.
 // =====================================================================
-const APP_VER = '2026-11-11.3';
+const APP_VER = '2026-11-11.4';
 const SB_URL = 'https://edmvfqelxsxevpmxgbav.supabase.co';
 const SB_KEY = 'sb_publishable_lgTmmLtUESDDyX2sff6ArQ_z65Ti9d6';
 const DOMINIO = 'planilla.maspisto.hn';
@@ -532,9 +532,7 @@ const I = {
 // ---------- personas ----------
 function nombreCorto(m) {
   if (!m) return 'Alguien';
-  if (m.alias) return m.alias;
-  const p = String(m.nombre || '').trim().split(/\s+/);
-  return p.length >= 4 ? p[0] + ' ' + p[2] : (m.nombre || 'Sin nombre');
+  return (m.alias || '').trim() || (m.cargo || '').trim() || 'Miembro';
 }
 const P = id => S.miembros.get(id);
 const nom = id => id === S.me ? 'Usted' : nombreCorto(P(id));
@@ -719,7 +717,7 @@ function selectorPersonas({ titulo = 'Elegir personas', multiple = true, elegido
     const pintar = () => {
       const q = $('#bq', h).value.trim().toLowerCase(); let area = null, html = '';
       for (const m of lista) {
-        if (q && !(m.nombre + ' ' + (m.alias || '') + ' ' + (m.cargo || '')).toLowerCase().includes(q)) continue;
+        if (q && !((m.nombre || '') + ' ' + (m.alias || '') + ' ' + (m.cargo || '')).toLowerCase().includes(q)) continue;
         if (m.area_id !== area) { area = m.area_id; html += `<div class="grupo-titulo" style="padding-left:4px">${esc(areaNombre(area))}</div>`; }
         html += `<div class="it ${sel.has(m.user_id) ? 'on' : ''}" data-u="${m.user_id}">${avatar(m.user_id, 's')}<div class="grow"><b>${esc(nombreCorto(m))}${m.user_id === S.me ? ' (usted)' : ''}</b><div class="small muted ell">${esc(m.cargo || '')}</div></div>${multiple ? '<div class="ck">✓</div>' : ''}</div>`;
       }
@@ -810,9 +808,13 @@ function pintarSinAcceso(t) {
 }
 
 async function cargarEquipo() {
-  const [m, a] = await Promise.all([sb.from('as_miembros').select('*'), sb.from('as_areas').select('*').order('orden').order('nombre')]);
+  // el nombre real no se puede leer desde la app: cada quien aparece con su cargo. Solo el gerente recibe los nombres.
+  const COLS = 'user_id,empresa_id,alias,cargo,area_id,rol,areas_jefe,foto,estado_texto,telefono,activo,excluido,ultimo_visto,creado_en';
+  const [m, a, n] = await Promise.all([sb.from('as_miembros').select(COLS), sb.from('as_areas').select('*').order('orden').order('nombre'),
+    S.yo?.rol === 'gerente' ? sb.rpc('as_nombres') : Promise.resolve({ data: [] })]);
   if (m.error) throw m.error; if (a.error) throw a.error;
-  S.miembros = new Map(m.data.map(x => [x.user_id, x]));
+  const nombres = new Map((n.data || []).map(x => [x.user_id, x.nombre]));
+  S.miembros = new Map(m.data.map(x => [x.user_id, { ...x, nombre: nombres.get(x.user_id) || (x.user_id === S.me ? S.yo?.nombre : '') || '' }]));
   S.areas = new Map(a.data.map(x => [x.id, x]));
 }
 
@@ -1068,7 +1070,7 @@ function pintarChats(soloLista = false) {
   // al buscar, también personas sin chat todavía
   if (q) {
     const conChat = new Set(todos.filter(c => c.tipo === 'directo').map(c => c.otro));
-    const ps = [...S.miembros.values()].filter(m => m.activo && m.user_id !== S.me && !conChat.has(m.user_id) && (m.nombre + ' ' + (m.alias || '')).toLowerCase().includes(q));
+    const ps = [...S.miembros.values()].filter(m => m.activo && m.user_id !== S.me && !conChat.has(m.user_id) && ((m.nombre || '') + ' ' + (m.alias || '') + ' ' + (m.cargo || '')).toLowerCase().includes(q));
     if (ps.length) html += `<div class="grupo-titulo">Personas</div>` + ps.map(m => `<div class="ci" data-persona="${m.user_id}">${avatar(m.user_id, '', true)}<div class="grow"><div class="t"><b>${esc(nombreCorto(m))}</b></div><div class="s"><span class="p">${esc(m.cargo || areaNombre(m.area_id))}</span></div></div></div>`).join('');
   }
   if (!html) html = `<div class="vacio"><div class="e">💬</div>${q ? 'Nada coincide con la búsqueda' : S.vistaChats === 'noleidos' ? 'No tiene mensajes sin leer' : 'Aún no hay chats'}</div>`;
@@ -2521,7 +2523,7 @@ async function candado({ inicio = false } = {}) {
     }
   } else if (!(inicio && recien)) {
     const d = pinDatos(); const bio = !!d.bio && await bioDisponible();
-    const r = await pantallaPin({ modo: 'abrir', titulo: S.yo ? `Hola, ${nombreCorto(P(S.me) || S.yo)}` : 'App bloqueada', sub: bio ? 'Use su huella o escriba su PIN' : 'Escriba su PIN', bio });
+    const r = await pantallaPin({ modo: 'abrir', titulo: S.yo?.nombre ? `Hola, ${String(S.yo.nombre).trim().split(/\s+/)[0]}` : 'App bloqueada', sub: bio ? 'Use su huella o escriba su PIN' : 'Escriba su PIN', bio });
     if (r === 'salir') { await salirPorPin('Se escribió mal el PIN 5 veces. Entre con su contraseña y cree un PIN nuevo.'); return false; }
     if (r === 'olvido') { await salirPorPin('Entre con su contraseña para crear un PIN nuevo.'); return false; }
   }
@@ -2712,7 +2714,7 @@ async function revisarComunicadosObligatorios() {
 // =====================================================================
 function pintarEquipo() {
   const q = (S.buscarEq || '').toLowerCase();
-  const gente = [...S.miembros.values()].filter(m => m.activo && (!q || (m.nombre + ' ' + (m.alias || '') + ' ' + (m.cargo || '')).toLowerCase().includes(q)));
+  const gente = [...S.miembros.values()].filter(m => m.activo && (!q || ((m.nombre || '') + ' ' + (m.alias || '') + ' ' + (m.cargo || '')).toLowerCase().includes(q)));
   const areas = [...S.areas.values()].filter(a => a.activo).sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre));
   const grupos = areas.map(a => [a, gente.filter(m => m.area_id === a.id)]).filter(g => g[1].length);
   const sin = gente.filter(m => !S.areas.has(m.area_id));
@@ -2724,7 +2726,7 @@ function pintarEquipo() {
     <div class="scroll" id="lequipo">${grupos.map(([a, ms]) => `<div class="grupo-titulo" style="color:${a.color}">${esc(a.nombre)} · ${ms.length}</div>${ms.sort((x, y) => (x.rol === 'gerente' ? 0 : x.rol === 'jefe' ? 1 : 2) - (y.rol === 'gerente' ? 0 : y.rol === 'jefe' ? 1 : 2) || nombreCorto(x).localeCompare(nombreCorto(y))).map(m => {
       const ab = [...S.tareas.values()].filter(t => t.responsable_id === m.user_id && ABIERTAS.includes(t.estado));
       const venc = ab.filter(vencida).length;
-      return `<div class="ci" data-persona="${m.user_id}">${avatar(m.user_id, '', true)}<div class="grow"><div class="t"><b>${esc(nombreCorto(m))}${m.user_id === S.me ? ' (usted)' : ''}</b>${rolTag(m)}</div><div class="s"><span class="p">${esc(m.estado_texto || m.cargo || '')}</span>${(puedeAsignarA(m.user_id) && puedeAsignar()) && ab.length ? `<span class="tag">📋 ${ab.length}</span>` : ''}${venc && puedeAsignarA(m.user_id) ? `<span class="tag" style="background:#FDECEC;color:var(--rojo)">⚠️ ${venc}</span>` : ''}</div></div></div>`;
+      return `<div class="ci" data-persona="${m.user_id}">${avatar(m.user_id, '', true)}<div class="grow"><div class="t"><b>${esc(nombreCorto(m))}${m.user_id === S.me ? ' (usted)' : ''}</b>${rolTag(m)}</div><div class="s"><span class="p">${esc(m.estado_texto || m.nombre || '')}</span>${(puedeAsignarA(m.user_id) && puedeAsignar()) && ab.length ? `<span class="tag">📋 ${ab.length}</span>` : ''}${venc && puedeAsignarA(m.user_id) ? `<span class="tag" style="background:#FDECEC;color:var(--rojo)">⚠️ ${venc}</span>` : ''}</div></div></div>`;
     }).join('')}`).join('') || '<div class="vacio">Nadie coincide</div>'}${quitados.length ? `<div class="grupo-titulo" style="color:#94A3B8">Quitados de Asígname · ${quitados.length}</div>${quitados.map(m => `<div class="ci" data-quitado="${m.user_id}" style="opacity:.6">${avatar(m.user_id)}<div class="grow"><div class="t"><b>${esc(nombreCorto(m))}</b></div><div class="s"><span class="p">${esc(m.cargo || '')} · toque para restaurar</span></div></div></div>`).join('')}` : ''}</div>`);
   $$('[data-quitado]').forEach(e => e.onclick = () => editarMiembro(e.dataset.quitado));
   $('#e-q').oninput = deb(e => { S.buscarEq = e.target.value; pintarEquipo(); $('#e-q').focus(); $('#e-q').setSelectionRange(99, 99); }, 200);
@@ -2740,7 +2742,7 @@ function verPersona(u) {
   const ver = puedeAsignarA(u) && (puedeAsignar() || u === S.me);
   const h = hoja({
     titulo: 'Perfil', cuerpo: `<div class="col" style="align-items:center;text-align:center">${avatar(u, 'xl', true)}
-      <div class="h1">${esc(nombreCorto(m))}</div>${esGerente() || u === S.me ? `<div class="muted">${esc(m.nombre)}</div>` : ''}
+      <div class="h1">${esc(nombreCorto(m))}</div>${m.nombre ? `<div class="muted">${esc(m.nombre)}</div>` : ''}
       <div>${esc(m.cargo || '')} · ${esc(areaNombre(m.area_id))}${m.rol !== 'miembro' ? ` · <b>${m.rol === 'gerente' ? 'Gerente' : 'Jefe de ' + esc((m.areas_jefe?.length ? m.areas_jefe : [m.area_id]).map(areaNombre).join(', '))}</b>` : ''}</div>
       ${m.estado_texto ? `<div class="tag" style="height:auto;padding:4px 10px">💬 ${esc(m.estado_texto)}</div>` : ''}
       <div class="small muted">${S.online.has(u) ? '🟢 En línea' : esc(ultVez(m.ultimo_visto))}</div></div>
@@ -2762,7 +2764,7 @@ function editarMiembro(u) {
   const areas = [...S.areas.values()].filter(a => a.activo);
   const h = hoja({
     titulo: 'Rol y área de ' + esc(nombreCorto(m)), cuerpo: `
-      <label class="f">Nombre corto (como aparece en el chat)<input class="inp" id="m-al" value="${esc(m.alias || '')}" placeholder="${esc(nombreCorto({ ...m, alias: null }))}"></label>
+      <label class="f">Cómo aparece en el chat (vacío = su cargo, numerado si se repite)<input class="inp" id="m-al" value="${esc(m.alias || '')}" placeholder="${esc(nombreCorto({ ...m, alias: null }))}"></label>
       <label class="f">Cargo<input class="inp" id="m-ca" value="${esc(m.cargo || '')}" maxlength="80"></label>
       <label class="f">Área<select class="inp" id="m-ar"><option value="">Sin área</option>${areas.map(a => `<option value="${a.id}" ${m.area_id === a.id ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></label>
       <div class="f" style="font-size:13px;font-weight:600;color:var(--txt2)">Rol en Asígname<div class="seg" id="m-rol" style="margin-top:6px">${[['miembro', 'Miembro'], ['jefe', 'Jefe de área'], ['gerente', 'Gerente']].map(([k, t]) => `<button type="button" data-r="${k}" class="${m.rol === k ? 'on' : ''}">${t}</button>`).join('')}</div>
@@ -2876,7 +2878,7 @@ function pintarPerfil() {
         <div class="h1">${esc(nombreCorto(m))}</div><div class="muted">${esc(m.cargo || '')} · ${esc(areaNombre(m.area_id))}</div>
         <div class="small muted">${esc(S.yo.empresa.nombre)} · ${S.yo.rol === 'gerente' ? 'Gerente' : S.yo.rol === 'jefe' ? 'Jefe de ' + esc(areasJefe().map(areaNombre).join(', ')) : 'Miembro'}</div></div>
       <div class="card col">
-        <label class="f">Nombre corto en el chat<input class="inp" id="pf-al" value="${esc(m.alias || '')}" placeholder="${esc(nombreCorto({ ...m, alias: null }))}"></label>
+        ${esGerente() ? `<label class="f">Cómo aparezco en el chat<input class="inp" id="pf-al" value="${esc(m.alias || '')}" placeholder="${esc(nombreCorto({ ...m, alias: null }))}"></label>` : ''}
         <label class="f">Estado<input class="inp" id="pf-es" value="${esc(m.estado_texto || '')}" placeholder="Ej: En ruta de cobro · Choloma" maxlength="80"></label>
         <div class="chips">${['Disponible', 'En ruta de cobro', 'En reunión', 'En visita de verificación', 'Almorzando'].map(e => `<button class="chip" data-es="${e}">${e}</button>`).join('')}</div>
         <button class="btn pri" id="pf-g">Guardar</button>
@@ -2901,7 +2903,7 @@ function pintarPerfil() {
   $('#pf-g').onclick = async () => {
     try {
       let path = null; if (foto) path = (await subir('fotos', foto, 'perfil.jpg')).path;
-      await rpc('as_mi_perfil', { p_alias: $('#pf-al').value, p_estado: $('#pf-es').value, p_foto: path });
+      await rpc('as_mi_perfil', { p_alias: $('#pf-al')?.value || '', p_estado: $('#pf-es').value, p_foto: path });
       await cargarEquipo(); toast('Perfil guardado'); pintarShell(); S.listaActual = null; leerRuta();
     } catch (e) { toast(errMsg(e), true); }
   };
