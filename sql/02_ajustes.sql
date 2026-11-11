@@ -27,5 +27,5 @@ alter table as_miembros add column if not exists excluido boolean not null defau
 -- La app debe pedir columnas explícitas de as_miembros (nunca select *).
 
 -- 11-nov-2026 (migración asigname_08_borrados_y_areas_extra)
--- as_mensajes_borrados: contenido original de los mensajes eliminados; solo lo lee el gerente (RLS). Lo llena as_borrar_mensaje.
+-- as_mensajes_borrados: contenido original de los mensajes eliminados; solo lo lee el administrador del sistema (as_miembros.admin_sistema, RLS). Lo llena as_borrar_mensaje.
 -- as_miembros.areas_extra + as_areas_extra(p_uid, p_areas): una persona puede aparecer en más de un área.

@@ -418,7 +418,7 @@ body.bloqueada #app,body.bloqueada .velo,body.bloqueada .visor,body.bloqueada .m
 // Asígname · tareas, comunicados y chat del equipo
 // Misma base y mismas cuentas que VerifyCredit y Mi Planilla.
 // =====================================================================
-const APP_VER = '2026-11-11.5';
+const APP_VER = '2026-11-11.6';
 const SB_URL = 'https://edmvfqelxsxevpmxgbav.supabase.co';
 const SB_KEY = 'sb_publishable_lgTmmLtUESDDyX2sff6ArQ_z65Ti9d6';
 const DOMINIO = 'planilla.maspisto.hn';
@@ -433,7 +433,7 @@ const S = {
   reac: new Map(),        // mensaje_id -> array {user_id, emoji}
   votos: new Map(),       // mensaje_id -> array {user_id, opciones}
   completos: new Set(),   // chats con todo el historial cargado
-  borrados: new Map(), // mensaje_id -> contenido original (solo gerente)
+  borrados: new Map(), // mensaje_id -> contenido original (solo el administrador del sistema)
   tareas: new Map(), comunicados: new Map(), lecturas: new Map(),
   online: new Set(), tipeando: new Map(), ruta: { v: 'chats' },
   vistaChats: 'todos', vistaTareas: 'mias', filtroTareas: 'abiertas', modoTareas: 'lista', filtroPersona: '', filtroArea: '',
@@ -558,6 +558,7 @@ function avatarChat(c, cls = '') {
 }
 function nombreChat(c) { if (!c) return ''; if (c.tipo === 'directo') return nombreCorto(P(c.otro)); return c.nombre || 'Grupo'; }
 const esGerente = () => S.yo?.rol === 'gerente';
+const esAdminSistema = () => !!P(S.me)?.admin_sistema; // administrador del sistema: ve los mensajes eliminados
 const areasJefe = () => S.yo?.areas_jefe || [];
 const puedeAsignar = () => esGerente() || areasJefe().length > 0;
 function puedeAsignarA(id) { if (id === S.me) return true; if (esGerente()) return true; const m = P(id); return !!m && areasJefe().includes(m.area_id); }
@@ -818,7 +819,7 @@ function pintarSinAcceso(t) {
 
 async function cargarEquipo() {
   // el nombre real no se puede leer desde la app: cada quien aparece con su cargo. Solo el gerente recibe los nombres.
-  const COLS = 'user_id,empresa_id,alias,cargo,area_id,rol,areas_jefe,foto,estado_texto,telefono,activo,excluido,ultimo_visto,creado_en,areas_extra';
+  const COLS = 'user_id,empresa_id,alias,cargo,area_id,rol,areas_jefe,foto,estado_texto,telefono,activo,excluido,ultimo_visto,creado_en,areas_extra,admin_sistema';
   const [m, a, n] = await Promise.all([sb.from('as_miembros').select(COLS), sb.from('as_areas').select('*').order('orden').order('nombre'),
     S.yo?.rol === 'gerente' ? sb.rpc('as_nombres') : Promise.resolve({ data: [] })]);
   if (m.error) throw m.error; if (a.error) throw a.error;
@@ -1216,7 +1217,7 @@ async function cargarExtras(chatId, ids) {
     sb.from('as_votos').select('mensaje_id,user_id,opciones').in('mensaje_id', ids),
   ]);
   ids.forEach(i => { S.reac.delete(i); S.votos.delete(i); });
-  if (esGerente()) {
+  if (esAdminSistema()) {
     const b = await sb.from('as_mensajes_borrados').select('*').in('mensaje_id', ids);
     (b.data || []).forEach(x => S.borrados.set(x.mensaje_id, x));
   }
@@ -1384,7 +1385,7 @@ function previewMsg(m) {
 }
 function htmlMensaje(m, prev) {
   if (m.tipo === 'sistema') return `<div class="sistema" data-m="${m.id}"><span>${esc(m.texto)}</span></div>`;
-  // el gerente siempre ve lo que decía un mensaje eliminado
+  // el administrador del sistema siempre ve lo que decía un mensaje eliminado
   const elim = m.borrado ? S.borrados.get(m.id) : null;
   if (elim) m = { ...m, tipo: elim.tipo, texto: elim.texto, archivo: elim.archivo, datos: elim.datos, borrado: false };
   const yo = m.user_id === S.me;
@@ -1428,7 +1429,7 @@ function htmlMensaje(m, prev) {
       default: cuerpo = `${autor}${reenv}${resp}<span class="txt">${formatoTexto(m.texto)}</span>${meta}`;
     }
   }
-  if (elim) cuerpo = `<div class="elim">🚫 Eliminado${elim.borrado_por && elim.borrado_por !== m.user_id ? ' por ' + esc(nom(elim.borrado_por)) : ''} · ${fechaHora(elim.borrado_en)} · solo lo ve el gerente</div>` + cuerpo;
+  if (elim) cuerpo = `<div class="elim">🚫 Eliminado${elim.borrado_por && elim.borrado_por !== m.user_id ? ' por ' + esc(nom(elim.borrado_por)) : ''} · ${fechaHora(elim.borrado_en)} · solo lo ve el administrador del sistema</div>` + cuerpo;
   let reacHtml = '';
   if (reacs.length) {
     const g = {}; reacs.forEach(r => g[r.emoji] = (g[r.emoji] || 0) + 1);
@@ -2044,7 +2045,7 @@ function rtChat(n) {
   pintarChatsDeb();
 }
 function rtBorrado(b) {
-  if (!b?.mensaje_id || !esGerente()) return;
+  if (!b?.mensaje_id || !esAdminSistema()) return;
   S.borrados.set(b.mensaje_id, b);
   const m = (S.msgs.get(b.chat_id) || []).find(x => x.id === b.mensaje_id);
   if (m && chatAbierto === b.chat_id) reemplazarMensajeDom(m);
