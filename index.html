@@ -348,6 +348,28 @@ body.ver-detalle .nav{display:none}
 @keyframes gira{to{transform:rotate(360deg)}}
 .aviso-top{background:#FFF7D6;color:#7A5A00;font-size:13px;padding:8px 14px;display:flex;align-items:center;gap:8px}
 .aviso-top.rojo{background:#FDECEC;color:var(--rojo)}
+/* ---------- Bloqueo con PIN ---------- */
+.candado{position:fixed;inset:0;z-index:300;background:var(--tinta);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 20px calc(24px + var(--sab));overflow:auto}
+.candado .cz{width:100%;max-width:340px;display:flex;flex-direction:column;align-items:center;gap:6px;margin:auto}
+.candado .cz-logo{width:64px;height:64px;border-radius:16px;margin-bottom:6px}
+.candado h2{font-family:Poppins,Inter,sans-serif;font-size:20px;margin:6px 0 0;color:#fff;text-align:center}
+.candado .cz-sub{color:#AFC6F0;font-size:14px;text-align:center;min-height:20px}
+.candado .cz-err{color:#FFB4A8;font-size:13px;min-height:18px;text-align:center}
+.pin-pts{display:flex;gap:16px;margin:18px 0 6px}
+.pin-pts i{width:15px;height:15px;border-radius:50%;border:2px solid #AFC6F0;transition:.15s}
+.pin-pts i.on{background:#FFD400;border-color:#FFD400}
+.pin-pts.mal{animation:pinmal .35s}
+@keyframes pinmal{20%,60%{transform:translateX(-9px)}40%,80%{transform:translateX(9px)}}
+.pin-tec{display:grid;grid-template-columns:repeat(3,76px);gap:14px;margin-top:14px}
+.pin-tec button{height:76px;border-radius:50%;background:rgba(255,255,255,.1);color:#fff;font-family:Poppins,Inter,sans-serif;font-size:26px;font-weight:600;display:flex;align-items:center;justify-content:center}
+.pin-tec button:active{background:rgba(255,255,255,.25)}
+.pin-tec button.lt{background:none}
+.pin-tec button svg{width:30px;height:30px}
+.pin-tec button[disabled]{visibility:hidden}
+.candado .cz-link{color:#AFC6F0;text-decoration:underline;font-size:13px;margin-top:18px}
+body.bloqueada #app,body.bloqueada .velo,body.bloqueada .visor,body.bloqueada .menu-ctx,body.bloqueada .toast{visibility:hidden}
+@media (max-height:640px){.pin-tec{grid-template-columns:repeat(3,60px);gap:10px;margin-top:6px}.pin-tec button{height:60px;font-size:22px}.candado .cz-logo{width:44px;height:44px}.pin-pts{margin:10px 0 2px}}
+@media (max-height:480px){.candado .cz{flex-direction:row;flex-wrap:wrap;justify-content:center;max-width:560px}.pin-tec{grid-template-columns:repeat(6,48px);gap:8px}.pin-tec button{height:48px;font-size:19px}.candado .cz-logo{display:none}.candado h2,.candado .cz-sub,.candado .cz-err{width:100%}}
 /* Pantallas grandes: más aire y letra un poco mayor */
 @media (min-width:1500px){
   html,body{font-size:16px}
@@ -393,7 +415,7 @@ body.ver-detalle .nav{display:none}
 // Asígname · tareas, comunicados y chat del equipo
 // Misma base y mismas cuentas que VerifyCredit y Mi Planilla.
 // =====================================================================
-const APP_VER = '2026-11-11.2';
+const APP_VER = '2026-11-11.3';
 const SB_URL = 'https://edmvfqelxsxevpmxgbav.supabase.co';
 const SB_KEY = 'sb_publishable_lgTmmLtUESDDyX2sff6ArQ_z65Ti9d6';
 const DOMINIO = 'planilla.maspisto.hn';
@@ -740,12 +762,16 @@ function pintarLogin(msg = '') {
     const { error } = await sb.auth.signInWithPassword({ email, password: f.p.value });
     b.disabled = false;
     if (error) { const el = $('#lerr'); el.textContent = errMsg(error); el.classList.remove('hidden'); return; }
+    try { sessionStorage.setItem('as_recien', '1'); } catch (_) { }
     arrancar();
   };
 }
 
 async function salir() {
   if (!await confirmar('¿Cerrar sesión en este teléfono?', { si: 'Cerrar sesión' })) return;
+  await cerrarSesion();
+}
+async function cerrarSesion() {
   try { const sub = await (await navigator.serviceWorker?.getRegistration())?.pushManager.getSubscription(); if (sub) await rpc('as_borrar_push', { p_endpoint: sub.endpoint }); } catch (_) { }
   await sb.removeAllChannels();
   await sb.auth.signOut();
@@ -757,7 +783,7 @@ async function arrancar() {
   if (arrancando) return; arrancando = true;
   try {
     const { data: { session } } = await sb.auth.getSession();
-    if (!session) { arrancando = false; return pintarLogin(); }
+    if (!session) { arrancando = false; let msg = ''; try { msg = sessionStorage.getItem('as_msg') || ''; sessionStorage.removeItem('as_msg'); } catch (_) { } return pintarLogin(msg); }
     S.me = session.user.id;
     $('#app').innerHTML = '<div class="cargando"><div class="spin"></div>Cargando su equipo…</div>';
     const yo = await rpc('as_yo');
@@ -766,8 +792,9 @@ async function arrancar() {
     S.yo = yo;
     await Promise.all([cargarEquipo(), cargarChats(), cargarTareas(), cargarComunicados()]);
     pintarShell();
-    conectarTiempoReal();
     leerRuta();
+    if (!(await candado({ inicio: true }))) return;
+    conectarTiempoReal();
     rpc('as_marcar_recibido').catch(() => { });
     setInterval(() => { if (document.visibilityState === 'visible') rpc('as_ping').catch(() => { }); }, 120e3);
     registrarSW();
@@ -956,7 +983,7 @@ async function revisarVersion() {
     const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
     const { v } = await r.json();
     if (v && v !== APP_VER && sessionStorage.getItem('as_ver_intento') !== v) {
-      const ocupado = $('.velo') || ($('#txt')?.value || '').trim() || S.grabando;
+      const ocupado = bloqueada || $('.velo') || ($('#txt')?.value || '').trim() || S.grabando;
       if (ocupado) return;
       sessionStorage.setItem('as_ver_intento', v);
       location.reload();
@@ -1248,7 +1275,7 @@ function pintarSubtitulo() {
   }
 }
 const marcarLeidoChat = deb(() => {
-  const id = chatAbierto; if (!id || document.visibilityState !== 'visible') return;
+  const id = chatAbierto; if (!id || bloqueada || document.visibilityState !== 'visible') return;
   const msgs = $('#msgs'); if (msgs && msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight > 300) return;
   const arr = S.msgs.get(id) || []; const ult = [...arr].reverse().find(m => typeof m.id === 'number');
   const c = S.chats.get(id);
@@ -1963,7 +1990,7 @@ function rtMensaje(m, nuevo) {
   }
   if (nuevo) {
     c.ultimo_id = m.id; c.ultimo_en = m.creado_en; c.ultimo_user = m.user_id; c.ultimo_tipo = m.tipo; c.ultimo_texto = previewMsg(m);
-    const viendo = chatAbierto === m.chat_id && document.visibilityState === 'visible';
+    const viendo = chatAbierto === m.chat_id && document.visibilityState === 'visible' && !bloqueada;
     if (m.user_id !== S.me && m.tipo !== 'sistema') {
       if (viendo) marcarLeidoChat(); else c.no_leidos = (c.no_leidos || 0) + 1;
       if (c.archivado && !c.silenciado) c.archivado = false;
@@ -2383,6 +2410,156 @@ function rtTareaEvento(e) {
 </script>
 <script>
 // =====================================================================
+// BLOQUEO CON PIN Y HUELLA (igual que Mi Planilla)
+// El PIN es de 4 dígitos, por teléfono y por usuario; se guarda cifrado (PBKDF2) solo en el teléfono.
+// La huella usa el lector del teléfono (WebAuthn) y solo desbloquea la app en ese teléfono.
+// Se pide al abrir la app y después de 2 minutos sin uso.
+// =====================================================================
+const BLOQUEO_MIN = 2, PIN_LARGO = 4, PIN_INTENTOS = 5;
+let bloqueada = false, ultimaAct = Date.now();
+const pinClave = () => 'as_pin_' + (S.me || '');
+const pinDatos = () => { try { return JSON.parse(localStorage.getItem(pinClave()) || 'null'); } catch (_) { return null; } };
+const pinGuardar = d => { try { d ? localStorage.setItem(pinClave(), JSON.stringify(d)) : localStorage.removeItem(pinClave()); } catch (_) { } };
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const deB64 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
+async function pinHash(pin, salt) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
+  return b64(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: deB64(salt), iterations: 150000, hash: 'SHA-256' }, k, 256));
+}
+async function pinCorrecto(pin) { const d = pinDatos(); return !!d && (await pinHash(pin, d.salt)) === d.hash; }
+async function pinNuevo(pin) { const salt = b64(crypto.getRandomValues(new Uint8Array(16))); const d = pinDatos() || {}; pinGuardar({ ...d, salt, hash: await pinHash(pin, salt), fallos: 0 }); }
+const pinDebil = p => /^(\d)\1+$/.test(p) || '0123456789'.includes(p) || '9876543210'.includes(p);
+async function bioDisponible() {
+  try { return !!(window.PublicKeyCredential && window.isSecureContext && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch (_) { return false; }
+}
+async function bioRegistrar() {
+  const cred = await navigator.credentials.create({ publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: 'Asígname', id: location.hostname },
+    user: { id: new TextEncoder().encode(S.me).slice(0, 64), name: nombreCorto(P(S.me)) || 'usuario', displayName: nombreCorto(P(S.me)) || 'Usuario' },
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+    authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+    timeout: 60000, attestation: 'none' } });
+  if (!cred) throw new Error('No se pudo registrar la huella');
+  pinGuardar({ ...pinDatos(), bio: b64(cred.rawId) });
+}
+async function bioVerificar() {
+  const d = pinDatos(); if (!d?.bio) return false;
+  const r = await navigator.credentials.get({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), rpId: location.hostname,
+    allowCredentials: [{ type: 'public-key', id: deB64(d.bio), transports: ['internal'] }], userVerification: 'required', timeout: 60000 } });
+  const ad = r && new Uint8Array(r.response.authenticatorData);
+  return !!(ad && ad.length > 32 && (ad[32] & 0x04)); // el teléfono confirmó huella, rostro o bloqueo de pantalla
+}
+const ICON_HUELLA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 11v3a8 8 0 0 1-1.5 4.6"/><path d="M8.5 9.5A3.5 3.5 0 0 1 15.5 10v2.5a12 12 0 0 1-.8 4.3"/><path d="M5.6 7.4A7.5 7.5 0 0 1 19.5 10v1.8"/><path d="M5 12v.8a11 11 0 0 1-1 4.5"/><path d="M18.9 15.5a15 15 0 0 1-.9 3.4"/><path d="M7.6 20.3A11.5 11.5 0 0 0 9 15.6V12a3 3 0 0 1 .2-1"/></svg>';
+const ICON_BORRAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 5H9l-6 7 6 7h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z"/><path d="m17 9-6 6M11 9l6 6"/></svg>';
+
+// Pantalla de PIN. modo: 'abrir' (pedir PIN), 'crear' (pedir dos veces).
+function pantallaPin({ modo, titulo, sub, bio = false, permitirOlvido = true, cancelable = false }) {
+  return new Promise(resolver => {
+    document.querySelector('.candado')?.remove();
+    const c = document.createElement('div'); c.className = 'candado'; c.setAttribute('role', 'dialog'); c.setAttribute('aria-modal', 'true');
+    c.innerHTML = `<div class="cz"><img class="cz-logo" src="icon-192.png" alt="">
+      <h2 data-t></h2><div class="cz-sub" data-s></div>
+      <div class="pin-pts" aria-hidden="true">${'<i></i>'.repeat(PIN_LARGO)}</div><div class="cz-err" data-e aria-live="polite"></div>
+      <div class="pin-tec">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button type="button" data-n="${n}">${n}</button>`).join('')}
+        <button type="button" class="lt" data-bio ${bio ? '' : 'disabled'} aria-label="Usar huella">${ICON_HUELLA}</button><button type="button" data-n="0">0</button><button type="button" class="lt" data-borrar aria-label="Borrar">${ICON_BORRAR}</button></div>
+      ${cancelable ? '<button type="button" class="cz-link" data-cancelar>Cancelar</button>' : permitirOlvido ? '<button type="button" class="cz-link" data-olvido>Olvidé mi PIN · entrar con contraseña</button>' : ''}</div>`;
+    document.body.appendChild(c);
+    const T = $('[data-t]', c), Sb = $('[data-s]', c), E = $('[data-e]', c), pts = $$('.pin-pts i', c), cajaPts = $('.pin-pts', c);
+    let val = '', primero = null, ocupadoPin = false;
+    const pintar = () => pts.forEach((p, i) => p.classList.toggle('on', i < val.length));
+    const titulos = () => { T.textContent = primero == null ? titulo : 'Confirme su PIN'; Sb.textContent = primero == null ? sub : 'Escríbalo otra vez'; };
+    const fallo = msg => { E.textContent = msg; cajaPts.classList.remove('mal'); void cajaPts.offsetWidth; cajaPts.classList.add('mal'); navigator.vibrate?.(120); val = ''; pintar(); };
+    const terminar = r => { document.removeEventListener('keydown', tecla, true); c.remove(); resolver(r); };
+    titulos();
+    const completo = async () => {
+      ocupadoPin = true;
+      try {
+        if (modo === 'crear') {
+          if (primero == null) { if (pinDebil(val)) return fallo('Ese PIN es muy fácil de adivinar. Use otro.'); primero = val; val = ''; pintar(); E.textContent = ''; titulos(); return; }
+          if (val !== primero) { primero = null; titulos(); return fallo('Los PIN no coinciden. Empiece de nuevo.'); }
+          await pinNuevo(val); return terminar('ok');
+        }
+        if (await pinCorrecto(val)) { const d = pinDatos(); pinGuardar({ ...d, fallos: 0 }); return terminar('ok'); }
+        const d = pinDatos(); const f = (d?.fallos || 0) + 1; pinGuardar({ ...d, fallos: f });
+        if (f >= PIN_INTENTOS) { pinGuardar(null); return terminar('salir'); }
+        fallo(`PIN incorrecto. ${PIN_INTENTOS - f === 1 ? 'Le queda 1 intento' : `Le quedan ${PIN_INTENTOS - f} intentos`}.`);
+      } finally { ocupadoPin = false; }
+    };
+    const poner = n => { if (ocupadoPin || val.length >= PIN_LARGO) return; E.textContent = ''; val += n; pintar(); if (val.length === PIN_LARGO) setTimeout(completo, 120); };
+    const borrar = () => { if (ocupadoPin) return; val = val.slice(0, -1); pintar(); };
+    const usarBio = async () => { try { if (await bioVerificar()) { const d = pinDatos(); pinGuardar({ ...d, fallos: 0 }); terminar('ok'); } } catch (_) { E.textContent = 'No se reconoció la huella. Escriba su PIN.'; } };
+    $$('[data-n]', c).forEach(b => b.onclick = () => poner(b.dataset.n));
+    $('[data-borrar]', c).onclick = borrar;
+    $('[data-bio]', c).onclick = usarBio;
+    $('[data-olvido]', c) && ($('[data-olvido]', c).onclick = () => terminar('olvido'));
+    $('[data-cancelar]', c) && ($('[data-cancelar]', c).onclick = () => terminar('cancelar'));
+    // el teclado físico escribe el PIN y no llega a la app que está detrás
+    const tecla = e => { e.stopPropagation(); if (/^\d$/.test(e.key)) { e.preventDefault(); poner(e.key); } else if (e.key === 'Backspace') { e.preventDefault(); borrar(); } };
+    document.addEventListener('keydown', tecla, true);
+    document.activeElement?.blur?.();
+    if (bio && modo === 'abrir') setTimeout(usarBio, 350);
+  });
+}
+async function salirPorPin(msg) {
+  pinGuardar(null); bloqueada = false;
+  try { sessionStorage.setItem('as_msg', msg); } catch (_) { }
+  await cerrarSesion();
+}
+// Pide el PIN (o lo crea si este teléfono aún no tiene). Devuelve true cuando la app queda desbloqueada.
+async function candado({ inicio = false } = {}) {
+  if (!S.me || bloqueada) return !bloqueada;
+  let recien = false; try { recien = sessionStorage.getItem('as_recien') === '1'; sessionStorage.removeItem('as_recien'); } catch (_) { }
+  bloqueada = true; document.body.classList.add('bloqueada');
+  detenerGrabacion?.(true); try { audioActual?.pause(); } catch (_) { }
+  if (!pinDatos()?.hash) {
+    const r = await pantallaPin({ modo: 'crear', titulo: 'Cree su PIN', sub: `${PIN_LARGO} dígitos para abrir la app en este teléfono`, permitirOlvido: false });
+    if (r !== 'ok') return false;
+    document.body.classList.remove('bloqueada');
+    if (await bioDisponible()) {
+      const si = await confirmar('Puede abrir la app con su huella o su rostro en lugar del PIN. ¿Activarlo en este teléfono?', { titulo: 'Usar huella', si: 'Activar', no: 'Ahora no' });
+      if (si) { try { await bioRegistrar(); toast('Huella activada'); } catch (_) { toast('No se activó la huella. Puede hacerlo luego en su perfil.', true, 4000); } }
+    }
+  } else if (!(inicio && recien)) {
+    const d = pinDatos(); const bio = !!d.bio && await bioDisponible();
+    const r = await pantallaPin({ modo: 'abrir', titulo: S.yo ? `Hola, ${nombreCorto(P(S.me) || S.yo)}` : 'App bloqueada', sub: bio ? 'Use su huella o escriba su PIN' : 'Escriba su PIN', bio });
+    if (r === 'salir') { await salirPorPin('Se escribió mal el PIN 5 veces. Entre con su contraseña y cree un PIN nuevo.'); return false; }
+    if (r === 'olvido') { await salirPorPin('Entre con su contraseña para crear un PIN nuevo.'); return false; }
+  }
+  bloqueada = false; document.body.classList.remove('bloqueada'); ultimaAct = Date.now();
+  if (S.ruta?.v === 'chat') marcarLeidoChat();
+  return true;
+}
+// Bloqueo por inactividad (2 minutos sin tocar la app, también si se dejó en segundo plano)
+['pointerdown', 'keydown', 'touchstart', 'wheel', 'scroll'].forEach(ev => window.addEventListener(ev, () => { if (!bloqueada) ultimaAct = Date.now(); }, { passive: true, capture: true }));
+function revisarInactividad() { if (S.yo && !bloqueada && pinDatos()?.hash && Date.now() - ultimaAct >= BLOQUEO_MIN * 60000) candado(); }
+setInterval(revisarInactividad, 10000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') revisarInactividad(); });
+window.addEventListener('focus', revisarInactividad);
+window.addEventListener('pageshow', revisarInactividad);
+
+// Seguridad: cambiar PIN y activar o quitar la huella
+async function miSeguridad() {
+  const d = pinDatos() || {}; const bioOk = await bioDisponible();
+  const h = hoja({ titulo: 'PIN y huella', cuerpo: `<div class="small muted">La app pide su PIN al abrirse y después de ${BLOQUEO_MIN} minutos sin uso. El PIN y la huella solo funcionan en este teléfono.</div>
+    <div class="row"><div class="grow"><b>PIN de ${PIN_LARGO} dígitos</b><div class="small muted">Activo</div></div><button class="btn sm" id="cpin">Cambiar PIN</button></div>
+    <div class="row"><div class="grow"><b>Huella o rostro</b><div class="small muted">${bioOk ? (d.bio ? 'Activada en este teléfono' : 'Desactivada') : 'Este teléfono o navegador no lo permite'}</div></div>
+      ${bioOk ? `<button class="btn sm ${d.bio ? '' : 'pri'}" id="cbio">${d.bio ? 'Desactivar' : 'Activar'}</button>` : ''}</div>` });
+  $('#cpin', h).onclick = async () => {
+    await h.cerrar();
+    const r1 = await pantallaPin({ modo: 'abrir', titulo: 'Cambiar PIN', sub: 'Escriba su PIN actual', cancelable: true });
+    if (r1 === 'salir') return salirPorPin('Se escribió mal el PIN 5 veces. Entre con su contraseña y cree un PIN nuevo.');
+    if (r1 !== 'ok') return;
+    const r2 = await pantallaPin({ modo: 'crear', titulo: 'PIN nuevo', sub: `Escriba ${PIN_LARGO} dígitos`, cancelable: true });
+    if (r2 === 'ok') toast('PIN cambiado');
+  };
+  if ($('#cbio', h)) $('#cbio', h).onclick = async () => {
+    if (pinDatos()?.bio) { pinGuardar({ ...pinDatos(), bio: null }); toast('Huella desactivada'); h.cerrar(); return; }
+    try { await bioRegistrar(); toast('Huella activada'); h.cerrar(); } catch (_) { toast('No se pudo activar la huella', true); }
+  };
+}
+</script>
+<script>
+// =====================================================================
 // COMUNICADOS
 // =====================================================================
 const IMPORTANCIA = { normal: ['📢', 'Normal'], importante: ['⚠️', 'Importante'], urgente: ['🚨', 'Urgente'] };
@@ -2517,7 +2694,7 @@ function formComunicado(base = null) {
 // comunicados urgentes que piden confirmación: aparecen al abrir hasta confirmarlos
 let mostrandoObligatorio = false;
 async function revisarComunicadosObligatorios() {
-  if (mostrandoObligatorio || $('.velo')) return;
+  if (mostrandoObligatorio || bloqueada || $('.velo')) return;
   const c = [...S.comunicados.values()].filter(c => c.importancia === 'urgente' && c.requiere_confirmacion && !c.archivado && c.creado_por !== S.me && !S.lecturas.get(c.id)?.confirmado_en).sort((a, b) => new Date(a.creado_en) - new Date(b.creado_en))[0];
   if (!c) return;
   mostrandoObligatorio = true;
@@ -2540,6 +2717,7 @@ function pintarEquipo() {
   const grupos = areas.map(a => [a, gente.filter(m => m.area_id === a.id)]).filter(g => g[1].length);
   const sin = gente.filter(m => !S.areas.has(m.area_id));
   if (sin.length) grupos.push([{ nombre: 'Sin área', color: '#94A3B8' }, sin]);
+  const quitados = esGerente() && !q ? [...S.miembros.values()].filter(m => m.excluido) : [];
   const rolTag = m => m.rol === 'gerente' ? '<span class="tag" style="background:#FEF3C7;color:#92400E">Gerente</span>' : m.rol === 'jefe' ? '<span class="tag" style="background:#E0E7FF;color:#3730A3">Jefe</span>' : '';
   ponerLista(`<div class="top"><div class="h1 grow">Equipo</div>${esGerente() ? `<button class="btn sm" id="e-areas" style="background:rgba(255,255,255,.18);color:#fff">Áreas</button>` : ''}</div>
     <div class="buscar"><span>${I.lupa}</span><input class="inp" id="e-q" placeholder="Buscar persona o cargo" value="${esc(S.buscarEq || '')}"></div>
@@ -2547,7 +2725,8 @@ function pintarEquipo() {
       const ab = [...S.tareas.values()].filter(t => t.responsable_id === m.user_id && ABIERTAS.includes(t.estado));
       const venc = ab.filter(vencida).length;
       return `<div class="ci" data-persona="${m.user_id}">${avatar(m.user_id, '', true)}<div class="grow"><div class="t"><b>${esc(nombreCorto(m))}${m.user_id === S.me ? ' (usted)' : ''}</b>${rolTag(m)}</div><div class="s"><span class="p">${esc(m.estado_texto || m.cargo || '')}</span>${(puedeAsignarA(m.user_id) && puedeAsignar()) && ab.length ? `<span class="tag">📋 ${ab.length}</span>` : ''}${venc && puedeAsignarA(m.user_id) ? `<span class="tag" style="background:#FDECEC;color:var(--rojo)">⚠️ ${venc}</span>` : ''}</div></div></div>`;
-    }).join('')}`).join('') || '<div class="vacio">Nadie coincide</div>'}</div>`);
+    }).join('')}`).join('') || '<div class="vacio">Nadie coincide</div>'}${quitados.length ? `<div class="grupo-titulo" style="color:#94A3B8">Quitados de Asígname · ${quitados.length}</div>${quitados.map(m => `<div class="ci" data-quitado="${m.user_id}" style="opacity:.6">${avatar(m.user_id)}<div class="grow"><div class="t"><b>${esc(nombreCorto(m))}</b></div><div class="s"><span class="p">${esc(m.cargo || '')} · toque para restaurar</span></div></div></div>`).join('')}` : ''}</div>`);
+  $$('[data-quitado]').forEach(e => e.onclick = () => editarMiembro(e.dataset.quitado));
   $('#e-q').oninput = deb(e => { S.buscarEq = e.target.value; pintarEquipo(); $('#e-q').focus(); $('#e-q').setSelectionRange(99, 99); }, 200);
   $$('[data-persona]').forEach(e => e.onclick = () => verPersona(e.dataset.persona));
   if ($('#e-areas')) $('#e-areas').onclick = gestionarAreas;
@@ -2561,7 +2740,7 @@ function verPersona(u) {
   const ver = puedeAsignarA(u) && (puedeAsignar() || u === S.me);
   const h = hoja({
     titulo: 'Perfil', cuerpo: `<div class="col" style="align-items:center;text-align:center">${avatar(u, 'xl', true)}
-      <div class="h1">${esc(nombreCorto(m))}</div><div class="muted">${esc(m.nombre)}</div>
+      <div class="h1">${esc(nombreCorto(m))}</div>${esGerente() || u === S.me ? `<div class="muted">${esc(m.nombre)}</div>` : ''}
       <div>${esc(m.cargo || '')} · ${esc(areaNombre(m.area_id))}${m.rol !== 'miembro' ? ` · <b>${m.rol === 'gerente' ? 'Gerente' : 'Jefe de ' + esc((m.areas_jefe?.length ? m.areas_jefe : [m.area_id]).map(areaNombre).join(', '))}</b>` : ''}</div>
       ${m.estado_texto ? `<div class="tag" style="height:auto;padding:4px 10px">💬 ${esc(m.estado_texto)}</div>` : ''}
       <div class="small muted">${S.online.has(u) ? '🟢 En línea' : esc(ultVez(m.ultimo_visto))}</div></div>
@@ -2584,19 +2763,21 @@ function editarMiembro(u) {
   const h = hoja({
     titulo: 'Rol y área de ' + esc(nombreCorto(m)), cuerpo: `
       <label class="f">Nombre corto (como aparece en el chat)<input class="inp" id="m-al" value="${esc(m.alias || '')}" placeholder="${esc(nombreCorto({ ...m, alias: null }))}"></label>
+      <label class="f">Cargo<input class="inp" id="m-ca" value="${esc(m.cargo || '')}" maxlength="80"></label>
       <label class="f">Área<select class="inp" id="m-ar"><option value="">Sin área</option>${areas.map(a => `<option value="${a.id}" ${m.area_id === a.id ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></label>
       <div class="f" style="font-size:13px;font-weight:600;color:var(--txt2)">Rol en Asígname<div class="seg" id="m-rol" style="margin-top:6px">${[['miembro', 'Miembro'], ['jefe', 'Jefe de área'], ['gerente', 'Gerente']].map(([k, t]) => `<button type="button" data-r="${k}" class="${m.rol === k ? 'on' : ''}">${t}</button>`).join('')}</div>
         <div class="small muted" style="margin-top:6px;font-weight:400">Miembro: tareas propias y chat · Jefe: asigna tareas y envía comunicados a sus áreas · Gerente: todo</div></div>
       <div id="m-jw" class="f" style="font-size:13px;font-weight:600;color:var(--txt2)">Áreas a su cargo<div class="chips" style="flex-wrap:wrap;margin-top:6px" id="m-je"></div><div class="small muted" style="font-weight:400">Si no elige, dirige su propia área</div></div>`,
     pie: `<button class="btn pri" id="ok">Guardar</button>`,
   });
+  $('.bd', h).insertAdjacentHTML('beforeend', u === S.me ? '' : `<label class="row" style="gap:10px"><span class="sw"><input type="checkbox" id="m-ex" ${m.excluido ? 'checked' : ''}><i></i></span><span>Quitar de Asígname<div class="small muted">No podrá entrar ni aparecerá en el equipo. No afecta a VerifyCredit ni a Mi Planilla.</div></span></label>`);
   let rol = m.rol;
   const pj = () => { $('#m-jw', h).classList.toggle('hidden', rol !== 'jefe'); $('#m-je', h).innerHTML = areas.map(a => `<button type="button" class="chip ${jefeDe.includes(a.id) ? 'on' : ''}" data-a="${a.id}">${esc(a.nombre)}</button>`).join(''); $$('[data-a]', h).forEach(b => b.onclick = () => { const id = b.dataset.a; jefeDe = jefeDe.includes(id) ? jefeDe.filter(x => x !== id) : [...jefeDe, id]; pj(); }); };
   pj();
   $$('#m-rol button', h).forEach(b => b.onclick = () => { rol = b.dataset.r; $$('#m-rol button', h).forEach(x => x.classList.toggle('on', x === b)); pj(); });
   $('#ok', h).onclick = async () => {
     try {
-      await rpc('as_admin_miembro', { p_uid: u, p_rol: rol, p_area: $('#m-ar', h).value || null, p_areas_jefe: rol === 'jefe' ? jefeDe : [], p_alias: $('#m-al', h).value });
+      await rpc('as_editar_miembro', { p_uid: u, p_rol: rol, p_area: $('#m-ar', h).value || null, p_areas_jefe: rol === 'jefe' ? jefeDe : [], p_alias: $('#m-al', h).value, p_cargo: $('#m-ca', h).value, p_excluido: $('#m-ex', h) ? $('#m-ex', h).checked : false });
       await cargarEquipo(); await cargarChats(); await h.cerrar(); toast('Guardado');
       if (S.listaActual === 'equipo') pintarEquipo();
     } catch (e) { toast(errMsg(e), true); }
@@ -2703,6 +2884,7 @@ function pintarPerfil() {
       <div class="card col">
         <div class="row"><span style="font-size:22px">🔔</span><div class="grow"><b>Notificaciones</b><div class="small muted">${perm === 'granted' ? 'Activadas en este teléfono' : perm === 'denied' ? 'Bloqueadas: actívelas en los ajustes del navegador' : 'Desactivadas'}</div></div>
           <button class="btn sm ${perm === 'granted' ? '' : 'pri'}" id="pf-not">${perm === 'granted' ? 'Probar' : 'Activar'}</button></div>
+        <div class="row"><span style="font-size:22px">🔒</span><div class="grow"><b>PIN y huella</b><div class="small muted">Se bloquea a los ${BLOQUEO_MIN} minutos sin uso</div></div><button class="btn sm" id="pf-pin">Cambiar</button></div>
         <div class="row" id="pf-inst-w"><span style="font-size:22px">📲</span><div class="grow"><b>Instalar la app</b><div class="small muted">Ábrala como app, con su ícono</div></div><button class="btn sm" id="pf-inst">Instalar</button></div>
       </div>
       <div class="card col small muted">
@@ -2725,6 +2907,7 @@ function pintarPerfil() {
   };
   $('#pf-not').onclick = () => activarNotificaciones(true).then(() => pintarPerfil()).catch(e => toast(errMsg(e), true));
   $('#pf-salir').onclick = salir;
+  $('#pf-pin').onclick = miSeguridad;
   const inst = $('#pf-inst-w');
   if (matchMedia('(display-mode: standalone)').matches) inst.classList.add('hidden');
   $('#pf-inst').onclick = async () => {

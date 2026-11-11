@@ -13,3 +13,10 @@ do $$ declare f record; begin
 end $$;
 -- (Las definiciones completas de private.as_resultado, private.as_tg_mensaje_after y private.as_sync
 --  están en la base; ver migraciones asigname_04_ajustes y asigname_05_permisos en Supabase.)
+
+-- 11-nov-2026 (migración asigname_06_cargo_fijo_excluido)
+-- as_miembros.cargo_fijo: el cargo corregido en Asígname no se pisa con el de Mi Planilla.
+-- as_miembros.excluido: persona quitada de Asígname aunque siga activa en las otras apps.
+-- as_editar_miembro(p_uid, p_rol, p_area, p_areas_jefe, p_alias, p_cargo, p_excluido) reemplaza a as_admin_miembro en la app.
+alter table as_miembros add column if not exists cargo_fijo boolean not null default false;
+alter table as_miembros add column if not exists excluido boolean not null default false;
